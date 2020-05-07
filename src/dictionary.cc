@@ -16,6 +16,7 @@
 #include <iostream>
 #include <iterator>
 #include <stdexcept>
+#include <regex>
 
 namespace fasttext {
 
@@ -426,6 +427,25 @@ std::string Dictionary::getLabel(int32_t lid) const {
         "Label id is out of range [0, " + std::to_string(nlabels_) + "]");
   }
   return words_[lid + nwords_].word;
+}
+
+std::string Dictionary::getProcessedLabel(int32_t lid) const {
+  if (lid < 0 || lid >= nlabels_) {
+    throw std::invalid_argument(
+        "Label id is out of range [0, " + std::to_string(nlabels_) + "]");
+  }
+
+  const std::string& labelPrefix = args_->label;
+  std::string label = words_[lid + nwords_].word;
+  size_t pos = label.find(labelPrefix);
+  if (pos != std::string::npos) {
+      // removal is done inplace
+      label.erase(pos, labelPrefix.length());
+  }
+
+  std::regex target = std::regex {"-"};
+  std::string replacement = " ";
+  return std::regex_replace(label, target, replacement);
 }
 
 void Dictionary::save(std::ostream& out) const {

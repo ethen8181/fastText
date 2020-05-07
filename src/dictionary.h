@@ -92,6 +92,7 @@ class Dictionary {
   bool readWord(std::istream&, std::string&) const;
   void readFromFile(std::istream&);
   std::string getLabel(int32_t) const;
+  std::string getProcessedLabel(int32_t) const;
   void save(std::ostream&) const;
   void load(std::istream&);
   std::vector<int64_t> getCounts(entry_type) const;

@@ -32,11 +32,11 @@ class Loss {
   std::vector<real> t_sigmoid_;
   std::vector<real> t_log_;
   std::shared_ptr<Matrix>& wo_;
-
+ 
+ public:
   real log(real x) const;
   real sigmoid(real x) const;
 
- public:
   explicit Loss(std::shared_ptr<Matrix>& wo);
   virtual ~Loss() = default;
 

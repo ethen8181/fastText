@@ -28,6 +28,7 @@
 #include "real.h"
 #include "utils.h"
 #include "vector.h"
+#include "index.h"
 
 namespace fasttext {
 
@@ -44,7 +45,9 @@ class FastText {
   std::shared_ptr<Model> model_;
   std::atomic<int64_t> tokenCount_{};
   std::atomic<real> loss_{};
+  std::shared_ptr<Index> index_;
   std::chrono::steady_clock::time_point start_;
+  bool indexed_;
   bool quant_;
   int32_t version;
   std::unique_ptr<DenseMatrix> wordVectors_;
@@ -141,6 +144,27 @@ class FastText {
       int32_t k,
       real threshold) const;
 
+  bool predictLineLabel(
+      std::istream& in,
+      std::vector<std::string>& predictions,
+      int32_t k,
+      real threshold) const;
+
+  void createIndex(
+      const int32_t M,
+      const int32_t efConstruction,
+      const int32_t randomSeed);
+
+  void setIndexEf(size_t ef);
+
+  Vector computeHidden(const std::vector<int32_t>& words) const;
+
+  bool knnQueryLineLabel(
+      std::istream& in,
+      std::vector<std::string>& predictions,
+      int32_t k,
+      real threshold) const;
+
   std::vector<std::pair<std::string, Vector>> getNgramVectors(
       const std::string& word) const;
 
@@ -161,6 +185,8 @@ class FastText {
   int getDimension() const;
 
   bool isQuant() const;
+
+  bool isIndexed() const;
 
   class AbortError : public std::runtime_error {
    public:

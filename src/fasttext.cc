@@ -207,6 +207,12 @@ void FastText::saveModel(const std::string& filename) {
   ofs.write((char*)&(args_->qout), sizeof(bool));
   output_->save(ofs);
 
+  // added additional logic of saving the index if it's used
+  ofs.write((char*)&(indexed_), sizeof(bool));
+  if (indexed_) {
+    index_->save(ofs);
+  }
+
   ofs.close();
 }
 
@@ -267,6 +273,12 @@ void FastText::loadModel(std::istream& in) {
     output_ = std::make_shared<QuantMatrix>();
   }
   output_->load(in);
+
+  // added additional logic of reading the index if it's used
+  in.read((char*)&indexed_, sizeof(bool));
+  if (indexed_) {
+    index_ = std::make_shared<Index>(in);
+  }
 
   buildModel();
 }
@@ -482,6 +494,103 @@ bool FastText::predictLine(
   for (const auto& p : linePredictions) {
     predictions.push_back(
         std::make_pair(std::exp(p.first), dict_->getLabel(p.second)));
+  }
+
+  return true;
+}
+
+bool FastText::predictLineLabel(
+    std::istream& in,
+    std::vector<std::string>& predictions,
+    int32_t k,
+    real threshold) const {
+  // light modification to fasttext's original predictLine
+  // to only return the predicted label instead of the label and score
+  predictions.clear();
+  if (in.peek() == EOF) {
+    return false;
+  }
+
+  std::vector<int32_t> words, labels;
+  dict_->getLine(in, words, labels);
+  Predictions linePredictions;
+  predict(k, words, linePredictions, threshold);
+  for (const auto& p : linePredictions) {
+    // predictions.emplace_back(dict_->getProcessedLabel(p.second));
+    predictions.emplace_back(dict_->getLabel(p.second));
+  }
+
+  return true;
+}
+
+void FastText::createIndex(
+    const int32_t M,
+    const int32_t efConstruction,
+    const int32_t randomSeed) {
+
+  if (quant_ && args_->qout) {
+    throw std::runtime_error("We can not create an index on quantized output matrix.");
+  }
+
+  const int32_t dim = getDimension();
+  const int32_t maxElements = getOutputMatrix()->rows();
+  index_ = std::make_shared<Index>(dim, maxElements, M, efConstruction, randomSeed);
+
+  index_->addItems(getOutputMatrix());
+  indexed_ = true;
+}
+
+void FastText::setIndexEf(size_t ef) {
+  if (!indexed_) {
+    throw std::runtime_error("Please call createIndex before calling this function.");
+  }
+  index_->setEf(ef);
+}
+
+Vector FastText::computeHidden(const std::vector<int32_t>& words) const {
+  // compute the output of the hidden layer by leveraging computeHidden
+  // from the underlying model object
+  Vector hidden(getDimension());
+  model_->computeHidden(words, hidden);
+  return hidden;
+}
+
+bool FastText::knnQueryLineLabel(
+    std::istream& in,
+    std::vector<std::string>& predictions,
+    int32_t k,
+    real threshold) const {
+
+  if (!indexed_) {
+    throw std::runtime_error("Please call createIndex before calling this function.");
+  }
+
+  predictions.clear();
+  if (in.peek() == EOF) {
+    return false;
+  }
+
+  // use the dictionary to extract the words/tokens from the raw text
+  std::vector<int32_t> words, labels;
+  dict_->getLine(in, words, labels);
+
+  // compute the hidden layer for the input token
+  Vector hidden = computeHidden(words);
+
+  // find the top k labels for the hidden layer representation of the input text
+  std::vector<std::pair<float, size_t>> linePredictions = index_->knnQuery(hidden, k);
+
+  for (const auto& p: linePredictions) {
+    // convert the inner product distance to a probability score, so we can perform
+    // filtering with the specified threshold
+    // the sigmoid method was originally not expose outside of the model_ object,
+    // we made it public to leverage the built-in function
+    float score = model_->sigmoid(1 - p.first);
+    if (score >= threshold) {
+      predictions.emplace_back(dict_->getLabel(p.second));
+    } else {
+      break;
+    }
   }
 
   return true;
@@ -762,6 +871,7 @@ void FastText::train(const Args& args, const TrainCallback& callback) {
   }
   output_ = createTrainOutputMatrix();
   quant_ = false;
+  indexed_ = false;
   auto loss = createLoss(output_);
   bool normalizeGradient = (args_->model == model_name::sup);
   model_ = std::make_shared<Model>(input_, output_, loss, normalizeGradient);
@@ -821,6 +931,10 @@ int FastText::getDimension() const {
 
 bool FastText::isQuant() const {
   return quant_;
+}
+
+bool FastText::isIndexed() const {
+  return indexed_;
 }
 
 bool comparePairs(

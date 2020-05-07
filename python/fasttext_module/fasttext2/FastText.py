@@ -9,7 +9,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-import fasttext_pybind as fasttext
+import fasttext2_pybind as fasttext
 import numpy as np
 import multiprocessing
 import sys
@@ -111,6 +111,9 @@ class _FastText(object):
 
     def is_quantized(self):
         return self.f.isQuant()
+    
+    def is_indexed(self):
+        return self.f.isIndexed()
 
     def get_dimension(self):
         """Get the dimension (size) of a lookup vector (hidden layer)."""
@@ -230,6 +233,61 @@ class _FastText(object):
                 probs, labels = ([], ())
 
             return labels, np.array(probs, copy=False)
+
+    def predict_label(self, text, k=1, threshold=0.0, on_unicode_error='strict'):
+        """
+        Similar to the .predict method expect this method only returns the predicted
+        labels. i.e. the score is not included in the response.
+        """
+        # unlike the original predict method, where we need to append the new line
+        # character to the end of each input text, this is done internally in the
+        # underlying c++ code
+        if isinstance(text, list):
+            all_labels = self.f.multilinePredictLabel(text, k, threshold, on_unicode_error)
+            return all_labels
+        else:
+            labels = self.f.predictLabel(text, k, threshold, on_unicode_error)
+            return labels
+    
+    def predict_label_future(self, text, k=1, threshold=0.0, on_unicode_error='strict'):
+        """
+        Similar to the .predict_label method expect this method also leverages
+        parallelism to speed up the prediction, useful for doing prediction
+        for a batch of input text.
+        """
+        if isinstance(text, list):
+            all_labels = self.f.multilinePredictLabelFuture(
+                text, k, threshold, on_unicode_error)
+            return all_labels
+        else:
+            labels = self.f.predictLabel(text, k, threshold, on_unicode_error)
+            return labels
+
+    def batch_predict_label(self, texts, k=1, threshold=0.0, on_unicode_error='strict',
+                            ef=30):
+        """
+        Similar to the .predict_label_future method expect this method also leverages
+        indexing on top of parallelism to speed up the prediction,
+        useful for doing prediction for a batch of input text. End-user should call
+        create_index prior to using this method.
+
+        Note that the input texts parameter only expects a list of string.
+        """
+        if ef <= k:
+            raise ValueError("the ef parameter should be larger than k.")
+
+        return self.f.multilineKnnQueryLabel(
+            texts, k, threshold, on_unicode_error, ef)
+
+    def create_index(self, M=5, ef_construction=100, random_seed=100):
+        """
+        Index the output matrix of the fasttext model to speed up all future predictions.
+        This is especially useful for multi-label classification where the number of label
+        space is large.
+        Underneath the hood it uses hnsw to build the index.
+        """
+        self.f.createIndex(M, ef_construction, random_seed)
+        return self
 
     def get_input_matrix(self):
         """

@@ -19,6 +19,7 @@
 #include <iterator>
 #include <sstream>
 #include <stdexcept>
+#include <future>
 
 using namespace pybind11::literals;
 namespace py = pybind11;
@@ -58,6 +59,44 @@ std::vector<std::pair<fasttext::real, py::str>> castToPythonString(
   return transformedPredictions;
 }
 
+std::vector<py::str> castToPythonStringLabelOnly(
+    const std::vector<std::string>& predictions,
+    const char* onUnicodeError) {
+  std::vector<py::str> transformedPredictions;
+
+  for (const std::string& prediction : predictions) {
+    transformedPredictions.emplace_back(castToPythonString(prediction, onUnicodeError));
+  }
+
+  return transformedPredictions;
+}
+
+std::vector<std::string> fasttextPredictLineLabel(
+    std::string line,
+    const fasttext::FastText& fasttext,
+    int32_t k,
+    float threshold) {
+  // function to predict the label for a single line,
+  // brought outside the fasttext class so we can use it in a parallel context,
+  // i.e. predict labels for multiple line simultaneously.
+  // note that fasttext expects a new line appended at the end of each line
+  std::vector<std::string> predictions;
+  std::stringstream ioss(line + "\n");
+  fasttext.predictLineLabel(ioss, predictions, k, threshold);
+  return predictions;
+}
+
+std::vector<std::string> fasttextKnnQueryLineLabel(
+    std::string line,
+    const fasttext::FastText& fasttext,
+    int32_t k,
+    float threshold) { 
+  std::vector<std::string> predictions;
+  std::stringstream ioss(line + "\n");
+  fasttext.knnQueryLineLabel(ioss, predictions, k, threshold);
+  return predictions;
+}
+
 std::pair<std::vector<py::str>, std::vector<py::str>> getLineText(
     fasttext::FastText& m,
     const std::string text,
@@ -84,7 +123,7 @@ std::pair<std::vector<py::str>, std::vector<py::str>> getLineText(
   return std::pair<std::vector<py::str>, std::vector<py::str>>(words, labels);
 }
 
-PYBIND11_MODULE(fasttext_pybind, m) {
+PYBIND11_MODULE(fasttext2_pybind, m) {
   py::class_<fasttext::Args>(m, "args")
       .def(py::init<>())
       .def_readwrite("input", &fasttext::Args::input)
@@ -405,6 +444,19 @@ PYBIND11_MODULE(fasttext_pybind, m) {
             return castToPythonString(predictions, onUnicodeError);
           })
       .def(
+          "predictLabel",
+          // NOTE: text needs to end in a newline
+          // to exactly mimic the behavior of the cli
+          [](fasttext::FastText& m,
+             std::string text,
+             int32_t k,
+             fasttext::real threshold,
+             const char* onUnicodeError) {
+
+            std::vector<std::string> predictions = fasttextPredictLineLabel(text, m, k, threshold);
+            return castToPythonStringLabelOnly(predictions, onUnicodeError);
+          })
+      .def(
           "multilinePredict",
           // NOTE: text needs to end in a newline
           // to exactly mimic the behavior of the cli
@@ -436,6 +488,78 @@ PYBIND11_MODULE(fasttext_pybind, m) {
 
             return make_pair(allLabels, allProbabilities);
           })
+      .def(
+          "multilinePredictLabel",
+          // NOTE: text needs to end in a newline
+          // to exactly mimic the behavior of the cli
+          [](fasttext::FastText& m,
+             std::vector<std::string>& lines,
+             int32_t k,
+             fasttext::real threshold,
+             const char* onUnicodeError) {
+
+            std::vector<std::vector<py::str>> allLabels;
+            for (std::string& line: lines) {
+              std::vector<std::string> predictions = fasttextPredictLineLabel(
+                line, m, k, threshold);
+              allLabels.emplace_back(castToPythonStringLabelOnly(predictions, onUnicodeError));
+            }
+
+            return allLabels;
+          })
+      .def(
+          "multilinePredictLabelFuture",
+          [](fasttext::FastText& m,
+             std::vector<std::string>& lines,
+             int32_t k,
+             fasttext::real threshold,
+             const char* onUnicodeError) {
+            
+            std::vector<std::future<std::vector<std::string>>> allFuturePredictions(lines.size());
+            std::vector<std::vector<py::str>> allPredictions(lines.size());
+            for (size_t i = 0; i < lines.size(); i++) {
+              // ensure FastText object is passed as a reference with std::ref
+              allFuturePredictions[i] = std::async(
+                  fasttextPredictLineLabel,
+                  lines[i], std::ref(m), k, threshold
+              );
+            }
+
+            for (size_t i = 0; i < lines.size(); i++) {
+              const std::vector<std::string>& allFuturePrediction = allFuturePredictions[i].get();
+              allPredictions[i] = castToPythonStringLabelOnly(allFuturePrediction, onUnicodeError);
+            }
+            return allPredictions;
+          })
+      .def(
+          "multilineKnnQueryLabel",
+          [](fasttext::FastText& m,
+             std::vector<std::string>& lines,
+             int32_t k,
+             fasttext::real threshold,
+             const char* onUnicodeError,
+             int32_t ef) {
+            
+            // set the index once before doing the parallel prediction
+            m.setIndexEf(ef);
+
+            std::vector<std::future<std::vector<std::string>>> allFuturePredictions(lines.size());
+            std::vector<std::vector<py::str>> allPredictions(lines.size());
+            for (size_t i = 0; i < lines.size(); i++) {
+              // ensure FastText object is passed as a reference with std::ref
+              allFuturePredictions[i] = std::async(
+                  fasttextKnnQueryLineLabel,
+                  lines[i], std::ref(m), k, threshold
+              );
+            }
+
+            for (size_t i = 0; i < lines.size(); i++) {
+              const std::vector<std::string>& allFuturePrediction = allFuturePredictions[i].get();
+              allPredictions[i] = castToPythonStringLabelOnly(allFuturePrediction, onUnicodeError);
+            }
+            return allPredictions;
+          })
+      .def("createIndex", &fasttext::FastText::createIndex)
       .def(
           "testLabel",
           [](fasttext::FastText& m,
@@ -522,5 +646,6 @@ PYBIND11_MODULE(fasttext_pybind, m) {
             return std::pair<std::vector<py::str>, std::vector<int32_t>>(
                 transformedSubwords, ngrams);
           })
-      .def("isQuant", [](fasttext::FastText& m) { return m.isQuant(); });
+      .def("isQuant", [](fasttext::FastText& m) { return m.isQuant(); })
+      .def("isIndexed", [](fasttext::FastText& m) { return m.isIndexed(); });
 }

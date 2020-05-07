@@ -23,6 +23,7 @@ import io
 
 __version__ = '0.9.2'
 FASTTEXT_SRC = "src"
+HNSWLIB_SRC = "third_party/hnswlib"
 
 # Based on https://github.com/pybind/python_example
 
@@ -63,9 +64,9 @@ fasttext_src_cc = list(
 
 ext_modules = [
     Extension(
-        str('fasttext_pybind'),
+        str('fasttext2_pybind'),
         [
-            str('python/fasttext_module/fasttext/pybind/fasttext_pybind.cc'),
+            str('python/fasttext_module/fasttext2/pybind/fasttext2_pybind.cc'),
         ] + fasttext_src_cc,
         include_dirs=[
             # Path to pybind11 headers
@@ -73,6 +74,7 @@ ext_modules = [
             get_pybind_include(user=True),
             # Path to fasttext source code
             FASTTEXT_SRC,
+            HNSWLIB_SRC
         ],
         language='c++',
         extra_compile_args=["-O0 -fno-inline -fprofile-arcs -pthread -march=native" if coverage else
@@ -166,7 +168,7 @@ def _get_readme():
 
 
 setup(
-    name='fasttext',
+    name='fasttext2',
     version=__version__,
     author='Onur Celebi',
     author_email='celebio@fb.com',
@@ -194,9 +196,9 @@ setup(
     install_requires=['pybind11>=2.2', "setuptools >= 0.7.0", "numpy"],
     cmdclass={'build_ext': BuildExt},
     packages=[
-        str('fasttext'),
-        str('fasttext.util'),
-        str('fasttext.tests'),
+        str('fasttext2'),
+        str('fasttext2.util'),
+        str('fasttext2.tests'),
     ],
     package_dir={str(''): str('python/fasttext_module')},
     zip_safe=False,

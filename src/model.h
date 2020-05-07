@@ -68,9 +68,12 @@ class Model {
       int32_t targetIndex,
       real lr,
       State& state);
-  void computeHidden(const std::vector<int32_t>& input, State& state) const;
 
+  void computeHidden(const std::vector<int32_t>& input, State& state) const;
+  void computeHidden(const std::vector<int32_t>& input, Vector& hidden) const;
+  
   real std_log(real) const;
+  real sigmoid(real x) const;
 
   static const int32_t kUnlimitedPredictions = -1;
   static const int32_t kAllLabelsAsTarget = -1;

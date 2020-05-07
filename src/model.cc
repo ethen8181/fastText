@@ -42,9 +42,16 @@ Model::Model(
 void Model::computeHidden(const std::vector<int32_t>& input, State& state)
     const {
   Vector& hidden = state.hidden;
+  computeHidden(input, hidden);
+}
+
+void Model::computeHidden(const std::vector<int32_t>& input, Vector& hidden) const {
+  // the original computeHidden method relies on fasttext State object,
+  // we modify it to accept the fasttext Vector as we don't need the other
+  // attributes from the State object for other use-cases.
   hidden.zero();
   for (auto it = input.cbegin(); it != input.cend(); ++it) {
-    hidden.addRow(*wi_, *it);
+      hidden.addRow(*wi_, *it);
   }
   hidden.mul(1.0 / input.size());
 }
@@ -92,6 +99,10 @@ void Model::update(
 
 real Model::std_log(real x) const {
   return std::log(x + 1e-5);
+}
+
+real Model::sigmoid(real x) const {
+  return loss_->sigmoid(x);
 }
 
 } // namespace fasttext
